@@ -26,7 +26,9 @@ description: >
 
 ### 步骤 0：检查环境
 
-`scrape.py` 内置三道检测——运行即检测，失败自动报原因：
+`scrape.py` 内置三道检测——运行即检测，失败自动报原因。
+
+**VPN 检查**: `check_vpn()` 内部创建独立 Session（`trust_env=False`），不依赖全局 requests 状态。如果 VPN 频繁断连，提示用户检查 aTrust 客户端稳定性。
 
 ```bash
 python scrape.py <teclId> <课程名> <教师名>
@@ -253,16 +255,32 @@ API 前缀：`https://cvs.seu.edu.cn/jy-application-resourcemanage`
 
 | 课程 | teclId | 教师 | 节数 |
 |------|--------|------|------|
-| 统一机器人学1 | 149551 | 司伟, 魏志勇 | 84 |
+| 统一机器人学Ⅰ | 149550 | 王玉娟 | 84 |
+| 统一机器人学Ⅰ | 149551 | 魏志勇, 司伟 | 84 |
+| 统一机器人学Ⅰ | 149552 | 毕可东, 阚亚鲸 | 84 |
 
 ## 常见坑
 
-1. **Python 版本**: Windows 上 `python`（3.13），不用 `python3`（3.14 有代理 bug）。`s.trust_env = False`
-2. **Cookie path**: 3 个 cookie path 是 `/jy-application-resourcemanage/`。CDP 用 `Network.getAllCookies`
-3. **VPN**: 必须先连。浏览器在 VPN 之后启动，否则 `ERR_CONNECTION_CLOSED`
-4. **JS bundle 名随部署变**: 不硬编码。API 端点稳定，沿用已知列表
-5. **参数名**: courseId（字幕）vs courId（心跳）vs id（播放计数），不一致
-6. **跨平台**: `get_all_cookies.py` 自动检测 Edge/Chrome 路径和平台，一行命令搞定
-7. **PowerShell 内联 Python**: 引号冲突，超过 10 行写成 .py 文件再跑
-8. **无字幕**: 纯板书课/设备故障，约占 2-3%
-9. **清理中间产物**: 任务完成立即删除临时脚本/截图/JSON，只留 cookie + 字幕 + 大纲
+### 环境
+1. **Python 版本**: `python`=3.13，禁用 `python3`（3.14 代理 bug）。`s.trust_env = False`
+2. **VPN 不稳**: 断连导致 DNS 解析失败。`check_vpn()` 用 Session（不用裸 `requests.get`），系统代理会干扰
+3. **PowerShell 内联 Python**: 引号冲突。超过 5 行写成 .py 文件再跑
+
+### API 端点差异
+4. **搜索 vs 下载用不同端点**:
+   - `group_subject_vod_list` → 搜索全部教学班（不受选课限制）
+   - `subject_vod_list_new` → 下载字幕（需要指定 teclId）
+5. **字段名不一致**: `group` 用 `teacNames`，`subject_vod_list_new` 用 `teclTeacNames`
+6. **搜索是模糊匹配**: "统一机器人"会命中 Ⅰ/Ⅱ/Ⅲ。用 `subjCode` 区分等级
+7. **搜索需翻页**: `pageSize=50`，多页时循环取全量
+
+### Cookie
+8. **CDP 用 `Network.getAllCookies`**（非 `getCookies`）: 3 个 cookie path 是 `/jy-application-resourcemanage/`
+9. **杀浏览器需 `--force`**: 先问用户确认再传
+
+### 字幕质量
+10. **AI 转录误差**: 口音/语速/噪音影响。不可控，不是脚本问题
+11. **无实质内容**: 习题课/调课通知/设备故障，占 2-5%，行数 < 50
+
+### 善后
+12. **清理中间产物**: 任务完成立即删除临时脚本/截图/JSON，只留 cookie + 字幕 + 大纲
