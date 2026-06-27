@@ -72,7 +72,7 @@ https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/#/play-center?teclId=149
 python scrape.py <teclId> <课程名> <教师名>
 ```
 
-输出：`~/Desktop/{课程名}_{教师名}_字幕/` 目录，每节课一个 txt。
+输出：`~/Desktop/{课程名}_{教师名}_字幕爬取/`，每节课一个子目录 `第X周_周X_第X节/`，内含 `YYYY-MM-DD_字幕.txt`。
 
 如果脚本不存在或参数变了，直接内联 Python（见下方"字幕下载代码"）。
 
@@ -176,25 +176,33 @@ def get_desktop():
     return os.path.expanduser("~/Desktop")
 
 label = f"{course_name}_{teacher}".rstrip("_")
-output_dir = os.path.join(get_desktop(), f"{label}_字幕")
+output_dir = os.path.join(get_desktop(), f"{label}_字幕爬取")
 os.makedirs(output_dir, exist_ok=True)
+
+WEEK_DAY = ["一", "二", "三", "四", "五", "六", "日"]
 
 ok = 0
 for i, rec in enumerate(records):
     rid = rec["id"]
     leti = rec.get("letiNumber", i + 1)
     date = rec.get("courBeginTime", "")[:10]
+    week_no = rec.get("weekNo", "?")
+    week_day_num = rec.get("week", 0)
+    week_day_name = WEEK_DAY[week_day_num - 1] if 1 <= week_day_num <= 7 else str(week_day_num)
+
+    lesson_dir = os.path.join(output_dir, f"第{week_no}周_周{week_day_name}_第{leti}节")
+    os.makedirs(lesson_dir, exist_ok=True)
     
     r = s.get(f"{base}/v1/course_vod_subtitle", headers=h, params={"courseId": rid})
     if r.status_code == 200 and len(r.content) > 100:
         items = r.json().get("data", [])
         texts = [it["res"].strip() for it in items if it.get("res", "").strip()]
         if texts:
-            fname = f"{i+1:02d}_{date}_第{leti}节.txt"
-            with open(os.path.join(output_dir, fname), "w", encoding="utf-8") as f:
+            fpath = os.path.join(lesson_dir, f"{date}_字幕.txt")
+            with open(fpath, "w", encoding="utf-8") as f:
                 f.write("\n".join(texts))
             ok += 1
-            print(f"  [{i+1:02d}/{len(records)}] {fname} ({len(texts)} 行)")
+            print(f"  [{i+1:02d}/{len(records)}] 第{week_no}周_周{week_day_name}_第{leti}节 ({len(texts)} 行)")
         else:
             print(f"  [{i+1:02d}/{len(records)}] 第{leti}节 无字幕")
     else:

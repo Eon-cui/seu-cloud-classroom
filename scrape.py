@@ -3,6 +3,12 @@
 用法: python scrape.py <teclId> <课程名> [教师名]
 示例: python scrape.py 149551 统一机器人学1 司伟
 
+输出结构:
+  ~/Desktop/统一机器人学1_司伟_字幕爬取/
+    ├── 第14周_周四_第8节/
+    │   └── 2026-06-04_字幕.txt
+    └── ...
+
 退出码:
   0 - 全部完成
   1 - 参数缺失
@@ -220,8 +226,9 @@ def main():
     print(f"时间: {first} ~ {last}")
 
     # ── 输出目录 ──
+    WEEK_DAY = ["一", "二", "三", "四", "五", "六", "日"]
     label = f"{course_name}_{teacher}".rstrip("_")
-    output_dir = os.path.join(get_desktop(), f"{label}_字幕")
+    output_dir = os.path.join(get_desktop(), f"{label}_字幕爬取")
     os.makedirs(output_dir, exist_ok=True)
     print(f"输出: {output_dir}")
 
@@ -236,7 +243,15 @@ def main():
     for i, rec in enumerate(records):
         rid = rec["id"]
         leti = rec.get("letiNumber", i + 1)
+        week_no = rec.get("weekNo", "?")
+        week_day_num = rec.get("week", 0)
+        week_day_name = WEEK_DAY[week_day_num - 1] if 1 <= week_day_num <= 7 else str(week_day_num)
         date = (rec.get("courBeginTime") or "")[:10]
+
+        # 子目录：第X周_周X_第X节
+        lesson_dir_name = f"第{week_no}周_周{week_day_name}_第{leti}节"
+        lesson_dir = os.path.join(output_dir, lesson_dir_name)
+        os.makedirs(lesson_dir, exist_ok=True)
 
         try:
             r = s.get(f"{base}/v1/course_vod_subtitle", headers=headers,
@@ -246,21 +261,21 @@ def main():
                 items = r.json().get("data", [])
                 texts = [it["res"].strip() for it in items if it.get("res", "").strip()]
                 if texts:
-                    fname = f"{i+1:02d}_{date}_第{leti}节.txt"
-                    fpath = os.path.join(output_dir, fname)
+                    fname = f"{date}_字幕.txt"
+                    fpath = os.path.join(lesson_dir, fname)
                     with open(fpath, "w", encoding="utf-8") as f:
                         f.write("\n".join(texts))
                     ok += 1
-                    print(f"  [{i+1:02d}/{len(records)}] {green('OK')} {fname} ({len(texts)} 行)")
+                    print(f"  [{i+1:02d}/{len(records)}] {green('OK')} {lesson_dir_name}/{fname} ({len(texts)} 行)")
                 else:
                     empty += 1
-                    print(f"  [{i+1:02d}/{len(records)}] {yellow('空')} 第{leti}节 无字幕数据")
+                    print(f"  [{i+1:02d}/{len(records)}] {yellow('空')} {lesson_dir_name} 无字幕数据")
             else:
                 failed += 1
-                print(f"  [{i+1:02d}/{len(records)}] {red(f'HTTP {r.status_code}')}")
+                print(f"  [{i+1:02d}/{len(records)}] {red(f'HTTP {r.status_code}')} {lesson_dir_name}")
         except Exception as e:
             failed += 1
-            print(f"  [{i+1:02d}/{len(records)}] {red(f'错误: {e}')}")
+            print(f"  [{i+1:02d}/{len(records)}] {red(f'错误: {e}')} {lesson_dir_name}")
 
     # ── 结果摘要 ──
     print(f"\n{'=' * 50}")
