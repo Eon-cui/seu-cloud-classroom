@@ -1,13 +1,13 @@
 """SEU 云课堂字幕爬虫——生产版
 
 用法:
+  python scrape.py --search <关键词>                       # 搜索课程，返回 teclId
   python scrape.py <teclId> <课程名> [教师名] [--weeks 范围]
-  python scrape.py <teclId> <课程名> [教师名] --dry-run   # 只看周次分布不下载
+  python scrape.py <teclId> <课程名> [教师名] --dry-run
 
 示例:
-  python scrape.py 149551 统一机器人学1 司伟 --weeks 1-5     # 第1~5周
-  python scrape.py 149551 统一机器人学1 司伟 --weeks 3,7,10  # 第3、7、10周
-  python scrape.py 149551 统一机器人学1 司伟               # 全部（但会先提示范围）
+  python scrape.py --search 统一机器人                      # 搜课程
+  python scrape.py 149551 统一机器人学1 司伟 --weeks 1-5    # 第1~5周
 
 输出结构:
   ~/Desktop/统一机器人学1_司伟_字幕爬取/
@@ -125,6 +125,35 @@ def show_week_summary(records):
     return sorted_weeks[0], sorted_weeks[-1]
 
 
+def search_courses(keyword, session, headers):
+    """按课程名搜索，返回 [(teclId, subjName, teachers, orgaNames)]"""
+    print(f"搜索课程「{keyword}」...", end=" ")
+    try:
+        r = session.get(f"{API_BASE}/v1/subject_vod_list_new", headers=headers, params={
+            "subjName": keyword,
+            "page.pageIndex": 1,
+            "page.pageSize": 50,
+        }, timeout=TIMEOUT_SHORT)
+        data = r.json()
+        records = data.get("data", {}).get("records", [])
+        seen = set()
+        results = []
+        for rec in records:
+            teclId = rec.get("teclId")
+            name = rec.get("subjName", "?")
+            teachers = rec.get("teclTeacNames", [])
+            org = rec.get("orgaNames", [])
+            key = (teclId, name)
+            if key not in seen:
+                seen.add(key)
+                results.append((teclId, name, teachers, org))
+        print(green(f"{len(results)} 条"))
+        return results
+    except Exception as e:
+        print(red(f"搜索失败: {e}"))
+        return []
+
+
 def check_vpn():
     """检测是否能到达 SEU 服务器"""
     print("① 检测 VPN 连通性...", end=" ")
@@ -237,12 +266,19 @@ def main():
     positional = []
     week_filter = None
     dry_run = False
+    search_term = None
 
     i = 1
     while i < len(sys.argv):
         a = sys.argv[i]
         if a == "--dry-run":
             dry_run = True
+        elif a == "--search":
+            i += 1
+            if i < len(sys.argv):
+                search_term = sys.argv[i]
+        elif a.startswith("--search="):
+            search_term = a.split("=", 1)[1]
         elif a == "--weeks":
             i += 1
             if i < len(sys.argv):
@@ -253,11 +289,39 @@ def main():
             positional.append(a)
         i += 1
 
+    # ── --search 模式：搜索课程 → 打印结果 → 退出 ──
+    if search_term:
+        if not check_vpn():
+            sys.exit(2)
+        cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seu_cookies.json")
+        if not os.path.exists(cookie_path):
+            print(red(f"未找到 Cookie: {cookie_path}"))
+            sys.exit(3)
+        with open(cookie_path) as f:
+            cookies = json.load(f)
+        s = requests.Session()
+        s.cookies.update(cookies)
+        s.trust_env = False
+        results = search_courses(search_term, s, {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/",
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "application/json",
+        })
+        if results:
+            print(f"\n{'课程名':30s} {'teclId':8s} {'教师':20s} {'学院'}")
+            print("-" * 90)
+            for teclId, name, teachers, org in results:
+                print(f"{name:30s} {teclId:8s} {', '.join(teachers):20s} {', '.join(org)}")
+        else:
+            print(yellow("未找到匹配课程"))
+        sys.exit(0)
+
     if len(positional) < 2:
-        print("用法: python scrape.py <teclId> <课程名> [教师名] [--weeks 范围] [--dry-run]")
-        print("示例:")
-        print("  python scrape.py 149551 统一机器人学1 司伟 --weeks 1-5")
-        print("  python scrape.py 149551 统一机器人学1 司伟 --dry-run")
+        print("用法:")
+        print("  python scrape.py --search <关键词>                    # 搜索课程")
+        print("  python scrape.py <teclId> <课程名> [教师名] [--weeks 范围]")
+        print("  python scrape.py <teclId> <课程名> [教师名] --dry-run")
         sys.exit(1)
 
     teclId = positional[0]

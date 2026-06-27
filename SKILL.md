@@ -61,16 +61,22 @@ python get_all_cookies.py --force
 
 ### 步骤 2：找 teclId
 
-用户给了课程名和教师名。teclId 是教学班 ID。
+**用户给课程名 → 自动搜索**：
 
-**方法 A（推荐）**: 让用户在 Edge 打开课程播放页，从 URL 提取 teclId：
+```bash
+python scrape.py --search <课程关键词>
 ```
-https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/#/play-center?teclId=149551&...
+
+搜索 `subject_vod_list_new?subjName=关键词`，返回匹配课程列表：
+```
+课程名                           teclId   教师                  学院
+------------------------------------------------------------------------------------------
+统一机器人学Ⅰ                    149551   魏志勇, 司伟           未来技术学院
 ```
 
-**方法 B**: 如果用户能提供课程页面 URL，直接从中解析。
-
-**方法 C（未来）**: 探索是否有课程搜索 API，通过课程名查 teclId。
+**只有一个匹配** → 直接用那个 teclId。
+**多个匹配** → 列出让用户选。
+**搜索不到** → 让用户在浏览器打开课程页，从 URL 提取 teclId。
 
 ### 步骤 3：确认周次 + 下载
 
