@@ -1,7 +1,13 @@
 """SEU 云课堂字幕爬虫——生产版
 
-用法: python scrape.py <teclId> <课程名> [教师名]
-示例: python scrape.py 149551 统一机器人学1 司伟
+用法:
+  python scrape.py <teclId> <课程名> [教师名] [--weeks 范围]
+  python scrape.py <teclId> <课程名> [教师名] --dry-run   # 只看周次分布不下载
+
+示例:
+  python scrape.py 149551 统一机器人学1 司伟 --weeks 1-5     # 第1~5周
+  python scrape.py 149551 统一机器人学1 司伟 --weeks 3,7,10  # 第3、7、10周
+  python scrape.py 149551 统一机器人学1 司伟               # 全部（但会先提示范围）
 
 输出结构:
   ~/Desktop/统一机器人学1_司伟_字幕爬取/
@@ -16,10 +22,10 @@
   3 - Cookie 过期或无效
   4 - teclId 不存在或课程为空
   5 - 部分字幕下载失败（已完成部分已保存）
+  6 - 未指定 --weeks（打印周次分布后退出，由 AI 询问用户）
 
 检测流程:
-  ① VPN 连通性 → ② Cookie 有效性 → ③ teclId → ④ 逐节下载
-  每步失败都打印具体原因和修复建议。
+  ① VPN → ② Cookie → ③ 课程列表 → ④ 显示周次 → ⑤ 用户确认范围 → ⑥ 下载
 """
 import requests, json, os, sys, ctypes, time
 
@@ -48,6 +54,68 @@ def green(text):
 
 def yellow(text):
     return f"\033[93m{text}\033[0m"
+
+
+# ═══════════════════════════════════════════════════════════
+# 周次过滤
+# ═══════════════════════════════════════════════════════════
+
+def parse_weeks(arg):
+    """解析 --weeks 参数，返回 set of int。
+    格式: "1-5" / "3" / "1-3,7,9-12"
+    """
+    weeks = set()
+    for part in arg.split(","):
+        part = part.strip()
+        if "-" in part:
+            a, b = part.split("-", 1)
+            weeks.update(range(int(a), int(b) + 1))
+        else:
+            weeks.add(int(part))
+    return weeks
+
+
+def show_week_summary(records):
+    """打印周次分布，返回 (min_week, max_week)"""
+    from collections import Counter
+    week_counts = Counter()
+    for rec in records:
+        wn = rec.get("weekNo")
+        if wn is not None:
+            week_counts[wn] += 1
+
+    if not week_counts:
+        return None, None
+
+    sorted_weeks = sorted(week_counts.keys())
+    print(f"\n周次分布（共 {len(sorted_weeks)} 周）:")
+    print(f"  第{sorted_weeks[0]}周 ~ 第{sorted_weeks[-1]}周")
+
+    # 压缩显示：连续周用范围，不连续用逗号
+    ranges = []
+    start = sorted_weeks[0]
+    end = start
+    for w in sorted_weeks[1:]:
+        if w == end + 1:
+            end = w
+        else:
+            ranges.append(f"{start}-{end}" if start != end else str(start))
+            start = end = w
+    ranges.append(f"{start}-{end}" if start != end else str(start))
+    print(f"  范围: {', '.join(ranges)}")
+    print(f"  节数: {sum(week_counts.values())}")
+
+    # 每周明细
+    print("  明细:")
+    for w in sorted_weeks:
+        count = week_counts[w]
+        # 找这周的第一天和最后一天
+        dates = sorted(r.get("courBeginTime", "")[:10] for r in records if r.get("weekNo") == w)
+        bar = "█" * min(count, 20)
+        date_range = f"{dates[0]}~{dates[-1]}" if len(dates) > 1 else (dates[0] if dates else "?")
+        print(f"    第{w:2d}周 {bar} {count}节  {date_range}")
+
+    return sorted_weeks[0], sorted_weeks[-1]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -166,16 +234,41 @@ def fetch_course_list(session, headers, base, teclId):
 
 def main():
     # ── 参数 ──
-    if len(sys.argv) < 3:
-        print("用法: python scrape.py <teclId> <课程名> [教师名]")
-        print("示例: python scrape.py 149551 统一机器人学1 司伟")
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = [a for a in sys.argv[1:] if a.startswith("--")]
+
+    if len(args) < 2:
+        print("用法: python scrape.py <teclId> <课程名> [教师名] [--weeks 范围] [--dry-run]")
+        print("示例:")
+        print("  python scrape.py 149551 统一机器人学1 司伟 --weeks 1-5")
+        print("  python scrape.py 149551 统一机器人学1 司伟 --dry-run")
         sys.exit(1)
 
-    teclId = sys.argv[1]
-    course_name = sys.argv[2]
-    teacher = sys.argv[3] if len(sys.argv) > 3 else ""
+    teclId = args[0]
+    course_name = args[1]
+    teacher = args[2] if len(args) > 2 else ""
+
+    # 解析 --weeks
+    week_filter = None
+    for f in flags:
+        if f.startswith("--weeks="):
+            week_filter = parse_weeks(f.split("=", 1)[1])
+        elif f == "--weeks":
+            # 下一个 arg 是值（如果没有 = 的话需要特殊处理）
+            pass
+
+    # 也支持位置参数风格的 --weeks（与值分开）
+    for i, a in enumerate(sys.argv[1:], 1):
+        if a == "--weeks" and i < len(sys.argv) - 1:
+            week_filter = parse_weeks(sys.argv[i + 1])
+
+    dry_run = "--dry-run" in sys.argv
 
     print(f"目标: {course_name} ({teacher or '未知教师'}) | teclId={teclId}")
+    if week_filter:
+        print(f"周次: {sorted(week_filter)}")
+    if dry_run:
+        print("模式: 只查看（不下载）")
     print("=" * 50)
 
     # ── 检测 ①：VPN ──
@@ -220,10 +313,41 @@ def main():
     teachers = records[0].get("teclTeacNames", [teacher])
     print(f"\n课程: {subj_name}")
     print(f"教师: {', '.join(teachers) if teachers else '未知'}")
-    print(f"节数: {len(records)}")
+    print(f"总节数: {len(records)}")
     first = (records[0].get("courBeginTime") or "")[:10]
     last = (records[-1].get("courBeginTime") or "")[:10]
     print(f"时间: {first} ~ {last}")
+
+    # ── 周次分布 ──
+    min_week, max_week = show_week_summary(records)
+
+    # ── dry-run：只显示不下载 ──
+    if dry_run:
+        print(f"\n{'=' * 50}")
+        print("--dry-run 模式，不下载。")
+        print("请使用 --weeks 参数指定周次范围：")
+        if min_week and max_week:
+            print(f"  python scrape.py {teclId} \"{course_name}\" \"{teacher}\" --weeks {min_week}-{max_week}")
+        sys.exit(0)
+
+    # ── 没有指定 weeks → 提示后退出，让 AI 问用户 ──
+    if week_filter is None:
+        print(f"\n{'=' * 50}")
+        print(yellow("未指定 --weeks。请指定要下载的周次范围："))
+        if min_week and max_week:
+            print(f"  python scrape.py {teclId} \"{course_name}\" \"{teacher}\" --weeks {min_week}-{max_week}  # 全部")
+            print(f"  python scrape.py {teclId} \"{course_name}\" \"{teacher}\" --weeks 1-5       # 第1~5周")
+        sys.exit(6)
+
+    # ── 过滤 records ──
+    filtered = [r for r in records if r.get("weekNo") in week_filter]
+    if not filtered:
+        print(red(f"\n周次 {sorted(week_filter)} 没有匹配的课程记录"))
+        print(f"可用范围: 第{min_week}周 ~ 第{max_week}周")
+        sys.exit(4)
+
+    print(f"\n筛选: 第{min(week_filter)}周 ~ 第{max(week_filter)}周 → {len(filtered)} 节")
+    records = filtered
 
     # ── 输出目录 ──
     WEEK_DAY = ["一", "二", "三", "四", "五", "六", "日"]

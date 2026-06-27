@@ -37,6 +37,7 @@ python scrape.py <teclId> <课程名> <教师名>
 | 3 | Cookie 过期 | 自动跑 `get_all_cookies.py` 重新提取 |
 | 4 | teclId 无效 | 让用户在浏览器打开课程页，从 URL 提取 teclId |
 | 5 | 部分失败 | 报告失败数量，建议重试 |
+| 6 | 未指定周次 | **显示周次分布后，问用户要爬第几周到第几周，拿到答案后加 `--weeks` 重跑** |
 
 ### 步骤 1：拿 Cookie
 
@@ -64,12 +65,26 @@ https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/#/play-center?teclId=149
 
 **方法 C（未来）**: 探索是否有课程搜索 API，通过课程名查 teclId。
 
-### 步骤 3：下载字幕
+### 步骤 3：确认周次 + 下载
 
-用 `scrape.py` 脚本：
+**首次运行不带 `--weeks`**——脚本打印周次分布后 exit 6：
 
-```powershell
+```bash
 python scrape.py <teclId> <课程名> <教师名>
+# → exit 6 → 显示周次分布图 →
+#   AI 问用户："共14周，要爬第几周到第几周？"
+#   用户回复 → AI 加 --weeks 重跑
+```
+
+**用户指定后**：
+```bash
+python scrape.py <teclId> <课程名> <教师名> --weeks 1-5   # 第1~5周
+python scrape.py <teclId> <课程名> <教师名> --weeks 3,7    # 第3、7周
+```
+
+**只看不下载**：
+```bash
+python scrape.py <teclId> <课程名> <教师名> --dry-run
 ```
 
 输出：`~/Desktop/{课程名}_{教师名}_字幕爬取/`，每节课一个子目录 `第X周_周X_第X节/`，内含 `YYYY-MM-DD_字幕.txt`。
