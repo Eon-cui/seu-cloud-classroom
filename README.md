@@ -48,13 +48,6 @@ seu-cloud-classroom/
 └── README.md                # 你正在看的
 ```
 
-| 文件 | 给谁用 | 作用 |
-|------|--------|------|
-| `scrape.py` | 人 / AI | `--search` 搜课程，`--weeks` 下周次，`--dry-run` 预览 |
-| `get_all_cookies.py` | 人 / AI | 自动开浏览器拿 Cookie，**需 `--force` 确认** |
-| `SKILL.md` | Claude Code | 告诉 AI 怎么调用这些脚本、退出码对应什么操作 |
-| `api-reference.md` | 开发者 | API 端点、字段名陷阱、字幕 JSON 结构 |
-
 ## License
 
 MIT
