@@ -63,15 +63,26 @@ def yellow(text):
 def parse_weeks(arg):
     """解析 --weeks 参数，返回 set of int。
     格式: "1-5" / "3" / "1-3,7,9-12"
+    非法输入打印错误并退出。
     """
     weeks = set()
     for part in arg.split(","):
         part = part.strip()
-        if "-" in part:
-            a, b = part.split("-", 1)
-            weeks.update(range(int(a), int(b) + 1))
-        else:
-            weeks.add(int(part))
+        if not part:
+            continue  # 容忍首尾逗号
+        try:
+            if "-" in part:
+                a_str, b_str = part.split("-", 1)
+                a, b = int(a_str), int(b_str)
+                if a > b:
+                    a, b = b, a  # 自动交换反转范围
+                weeks.update(range(a, b + 1))
+            else:
+                weeks.add(int(part))
+        except ValueError:
+            print(red(f"无效周次: '{part}'"))
+            print("格式: --weeks 1-5 或 --weeks 3,7,10 或 --weeks 1-3,7,9-12")
+            sys.exit(1)
     return weeks
 
 
@@ -110,7 +121,7 @@ def show_week_summary(records):
     for w in sorted_weeks:
         count = week_counts[w]
         # 找这周的第一天和最后一天
-        dates = sorted(r.get("courBeginTime", "")[:10] for r in records if r.get("weekNo") == w)
+        dates = sorted((r.get("courBeginTime") or "")[:10] for r in records if r.get("weekNo") == w)
         bar = "█" * min(count, 20)
         date_range = f"{dates[0]}~{dates[-1]}" if len(dates) > 1 else (dates[0] if dates else "?")
         print(f"    第{w:2d}周 {bar} {count}节  {date_range}")
@@ -159,16 +170,22 @@ def check_cookie(session, headers, base):
         r = session.get(f"{base}/authority/me", headers=headers, timeout=10)
         if r.status_code == 200:
             data = r.json()
-            if data.get("code") == "0":
+            code = data.get("code")
+            if code == "0":
                 print(green("OK"))
                 return True
-        print(red(f"HTTP {r.status_code}"))
-        if r.status_code == 401:
-            print(red("  → Cookie 已过期（401 Unauthorized）"))
-        elif r.status_code == 500:
-            print(red("  → Cookie 无效（500 服务器拒绝）"))
+            # HTTP 200 但业务码非 0
+            msg = data.get("message") or data.get("msg", "")
+            print(red(f"业务错误 (code={code})"))
+            print(red(f"  → {msg}"))
         else:
-            print(red(f"  → 异常状态码 {r.status_code}"))
+            print(red(f"HTTP {r.status_code}"))
+            if r.status_code == 401:
+                print(red("  → Cookie 已过期（401 Unauthorized）"))
+            elif r.status_code == 500:
+                print(red("  → Cookie 无效（500 服务器拒绝）"))
+            else:
+                print(red(f"  → 异常状态码 {r.status_code}"))
     except Exception as e:
         print(red(f"异常: {e}"))
 
@@ -276,7 +293,7 @@ def main():
         sys.exit(2)
 
     # ── 加载 cookie ──
-    cookie_path = os.path.join(os.path.dirname(__file__), "seu_cookies.json")
+    cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seu_cookies.json")
     if not os.path.exists(cookie_path):
         print(red(f"未找到 Cookie 文件: {cookie_path}"))
         print(yellow("请运行: python get_all_cookies.py"))
@@ -368,8 +385,11 @@ def main():
         rid = rec["id"]
         leti = rec.get("letiNumber", i + 1)
         week_no = rec.get("weekNo", "?")
-        week_day_num = rec.get("week", 0)
-        week_day_name = WEEK_DAY[week_day_num - 1] if 1 <= week_day_num <= 7 else str(week_day_num)
+        week_day_num = rec.get("week")
+        if week_day_num is not None and 1 <= week_day_num <= 7:
+            week_day_name = WEEK_DAY[week_day_num - 1]
+        else:
+            week_day_name = "?"  # 字段缺失不静默映射
         date = (rec.get("courBeginTime") or "")[:10]
 
         # 子目录：第X周_周X_第X节
@@ -382,7 +402,7 @@ def main():
                        params={"courseId": rid}, timeout=30)
 
             if r.status_code == 200 and len(r.content) > 100:
-                items = r.json().get("data", [])
+                items = r.json().get("data") or []  # .get("data", []) 遇 null 返回 None
                 texts = [it["res"].strip() for it in items if it.get("res", "").strip()]
                 if texts:
                     fname = f"{date}_字幕.txt"

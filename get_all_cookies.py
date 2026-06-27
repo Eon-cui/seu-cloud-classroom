@@ -8,6 +8,14 @@
 """
 import urllib.request, urllib.error, json, sys, os, platform, subprocess, time, shutil
 
+# 提前检查 websocket-client 依赖，避免用户登录后才发现没装
+try:
+    import websocket
+except ImportError:
+    print("错误: 缺少依赖 websocket-client")
+    print("请运行: pip install websocket-client")
+    sys.exit(1)
+
 NEEDED = [
     "007d0115-a0c0-4713-a023-75bc0ff16a59",
     "route",
@@ -98,8 +106,6 @@ def find_seu_page():
 
 # ── 提取 cookie ──
 def extract_cookies(ws_url):
-    import websocket
-
     ws = websocket.create_connection(ws_url, timeout=10)
     ws.send(json.dumps({"id": 1, "method": "Network.getAllCookies"}))
     resp = json.loads(ws.recv())
@@ -140,7 +146,14 @@ def main():
 
     print(f"使用浏览器: {browser_name} ({browser_path})")
 
-    # 3. 关掉旧实例，开新的带 CDP
+    # 3. 关掉旧实例（需 --force 确认）
+    if "--force" not in sys.argv:
+        print("⚠ 脚本将关闭所有 Edge/Chrome 浏览器窗口。")
+        print("  如有未保存工作，请先保存。")
+        print(f"  确认后重新运行: python get_all_cookies.py --force")
+        sys.exit(7)
+
+    print("关闭现有浏览器进程...")
     if IS_WIN:
         for proc in ["msedge", "chrome"]:
             subprocess.run(["taskkill", "/F", "/IM", f"{proc}.exe"], capture_output=True)
