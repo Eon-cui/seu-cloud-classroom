@@ -126,10 +126,12 @@ def show_week_summary(records):
 
 
 def search_courses(keyword, session, headers):
-    """按课程名搜索，返回 [(teclId, subjName, teachers, orgaNames)]"""
+    """按课程名搜索全部教学班，返回 [(teclId, subjName, teachers, orgaNames)]
+    用 group_subject_vod_list——能返回所有班级，不受当前用户选课限制。
+    """
     print(f"搜索课程「{keyword}」...", end=" ")
     try:
-        r = session.get(f"{API_BASE}/v1/subject_vod_list_new", headers=headers, params={
+        r = session.get(f"{API_BASE}/v1/group_subject_vod_list", headers=headers, params={
             "subjName": keyword,
             "page.pageIndex": 1,
             "page.pageSize": 50,
@@ -141,7 +143,7 @@ def search_courses(keyword, session, headers):
         for rec in records:
             teclId = rec.get("teclId")
             name = rec.get("subjName", "?")
-            teachers = rec.get("teclTeacNames", [])
+            teachers = rec.get("teacNames", [])  # group 端点用 teacNames 不是 teclTeacNames
             org = rec.get("orgaNames", [])
             key = (teclId, name)
             if key not in seen:
