@@ -1,0 +1,221 @@
+---
+name: seu-cloud-classroom
+description: >
+  爬取东南大学云课堂 (cvs.seu.edu.cn) 课程字幕。
+  触发：东大云课堂、SEU 网课、爬字幕、cvs.seu.edu.cn、统一机器人、云课堂爬虫。
+  用法：用户说"爬{课程名}（{教师名}）的课"→自动完成全部流程。
+---
+
+# 东南大学云课堂爬虫
+
+## 平台特征
+
+- **域名**: `cvs.seu.edu.cn`（主站）、`dncvsvod.seu.edu.cn`（视频存储）
+- **架构**: SPA（Vue + webpack code splitting，JS bundle 名随部署变）
+- **认证**: CAS SSO → OAuth2 → JWT。API 靠 cookie 维持登录态，5 个关键 cookie
+- **网络**: 须连 SEU VPN（aTrust），否则 `ERR_CONNECTION_CLOSED`
+
+## 工作流（给 AI 的指令）
+
+用户给课程名 → 你自动执行以下步骤。**每个步骤用现有的 Python 脚本，不要重写。**
+
+### 步骤 0：检查环境
+
+`scrape.py` 内置三道检测——运行即检测，失败自动报原因：
+
+```bash
+python scrape.py <teclId> <课程名> <教师名>
+```
+
+**退出码含义 + AI 应对**:
+
+| 码 | 含义 | AI 应做 |
+|----|------|---------|
+| 0 | 成功 | 报告结果 |
+| 1 | 参数缺失 | 检查参数 |
+| 2 | VPN 未连接 | 提醒用户连接 SEU VPN，等待确认后重试 |
+| 3 | Cookie 过期 | 自动跑 `get_all_cookies.py` 重新提取 |
+| 4 | teclId 无效 | 让用户在浏览器打开课程页，从 URL 提取 teclId |
+| 5 | 部分失败 | 报告失败数量，建议重试 |
+
+### 步骤 1：拿 Cookie
+
+检查 `seu_cookies.json` 存在（脚本同级目录）→ 直接跑 `scrape.py`。
+若 `scrape.py` 退出码=3（Cookie 过期），自动执行：
+
+```bash
+python get_all_cookies.py
+```
+
+脚本自动：检测 OS → 找 Edge/Chrome → 关旧实例 → 开 CDP → 打开 SEU → 等用户登录 → 保存 cookie。
+
+**支持**: Windows / macOS / Linux，Edge / Chrome / Chromium 全兼容。
+
+### 步骤 2：找 teclId
+
+用户给了课程名和教师名。teclId 是教学班 ID。
+
+**方法 A（推荐）**: 让用户在 Edge 打开课程播放页，从 URL 提取 teclId：
+```
+https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/#/play-center?teclId=149551&...
+```
+
+**方法 B**: 如果用户能提供课程页面 URL，直接从中解析。
+
+**方法 C（未来）**: 探索是否有课程搜索 API，通过课程名查 teclId。
+
+### 步骤 3：下载字幕
+
+用 `scrape.py` 脚本：
+
+```powershell
+python scrape.py <teclId> <课程名> <教师名>
+```
+
+输出：`~/Desktop/{课程名}_{教师名}_字幕/` 目录，每节课一个 txt。
+
+如果脚本不存在或参数变了，直接内联 Python（见下方"字幕下载代码"）。
+
+## 已保存的 Cookie
+
+位置：脚本同级目录 `./seu_cookies.json`
+
+5 个 cookie：
+```json
+{
+  "007d0115-a0c0-4713-a023-75bc0ff16a59": "...",
+  "route": "...",
+  "jy-application-resourcemanage": "...",
+  "_bl_usercode": "...",
+  "_bl_dept": "..."
+}
+```
+
+前 2 个 `path=/`，后 3 个 `path=/jy-application-resourcemanage/`。Python `requests.Session().cookies.update()` 不区分 path，都能用。
+
+## API 参考
+
+API 前缀：`https://cvs.seu.edu.cn/jy-application-resourcemanage`
+
+| API | 参数 | 用途 |
+|-----|------|------|
+| `/v1/subject_vod_list_new` | `teclIds`, `page.*` | 课程节次列表 |
+| `/v1/course_vod_subtitle` | `courseId={recordId}` | 字幕 JSON |
+| `/v1/vod/playCount` | `id={recordId}` | 播放次数 |
+| `/v1/vod/keepAlive` | POST `{"courId": recordId}` | 心跳 |
+| `/authority/me` | — | 用户权限（测 cookie 有效性） |
+
+**参数名陷阱**: 字幕用 `courseId`（全拼），keepAlive 用 `courId`（缩写），playCount 用 `id`。
+
+### subject_vod_list_new 返回记录关键字段
+
+- `id`: 课程记录 ID → 字幕 API 的 `courseId` 参数
+- `letiNumber`: 节次编号（如 1, 2, 3...）
+- `courBeginTime` / `courEndTime`: 上课时间
+- `subjName`: 课程名
+- `teacNames`: 教师名数组
+- `teclTeacNames`: 教学班所有教师
+- `clroName`: 教室名
+
+### 字幕 JSON 结构
+
+```json
+{"data": [{"bg": 开始毫秒, "ed": 结束毫秒, "res": "文本", "transferType": 1}]}
+```
+
+`transferType=1` = AI 语音识别生成。
+
+## 字幕下载代码（内联版）
+
+当 `scrape.py` 不可用时，直接跑这段：
+
+```python
+import requests, json, os, sys
+
+# 加载 cookie
+with open(os.path.join(os.path.dirname(__file__), "seu_cookies.json")) as f:
+    cookies = json.load(f)
+
+s = requests.Session()
+s.cookies.update(cookies)
+s.trust_env = False
+
+h = {
+    "User-Agent": "Mozilla/5.0",
+    "Referer": "https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/",
+    "X-Requested-With": "XMLHttpRequest",
+    "Accept": "application/json",
+}
+
+base = "https://cvs.seu.edu.cn/jy-application-resourcemanage"
+teclId = sys.argv[1]  # 从命令行参数取
+course_name = sys.argv[2] if len(sys.argv) > 2 else "course"
+teacher = sys.argv[3] if len(sys.argv) > 3 else ""
+
+# 获取课程列表
+r = s.get(f"{base}/v1/subject_vod_list_new", headers=h, params={
+    "teclIds": teclId,
+    "page.pageIndex": 1,
+    "page.pageSize": 200,
+    "page.orders[0].asc": "false",
+    "page.orders[0].field": "courBeginTime",
+    "schoolOpenStatusFlag": "false",
+})
+data = r.json()
+records = data["data"]["records"]
+print(f"共 {len(records)} 节")
+
+# 下载字幕
+# ── 桌面路径（Windows 可能重定向 Desktop 文件夹）──
+import ctypes
+def get_desktop():
+    if os.name == "nt":
+        buf = ctypes.create_unicode_buffer(260)
+        ctypes.windll.shell32.SHGetFolderPathW(None, 0, None, 0, buf)
+        return buf.value
+    return os.path.expanduser("~/Desktop")
+
+label = f"{course_name}_{teacher}".rstrip("_")
+output_dir = os.path.join(get_desktop(), f"{label}_字幕")
+os.makedirs(output_dir, exist_ok=True)
+
+ok = 0
+for i, rec in enumerate(records):
+    rid = rec["id"]
+    leti = rec.get("letiNumber", i + 1)
+    date = rec.get("courBeginTime", "")[:10]
+    
+    r = s.get(f"{base}/v1/course_vod_subtitle", headers=h, params={"courseId": rid})
+    if r.status_code == 200 and len(r.content) > 100:
+        items = r.json().get("data", [])
+        texts = [it["res"].strip() for it in items if it.get("res", "").strip()]
+        if texts:
+            fname = f"{i+1:02d}_{date}_第{leti}节.txt"
+            with open(os.path.join(output_dir, fname), "w", encoding="utf-8") as f:
+                f.write("\n".join(texts))
+            ok += 1
+            print(f"  [{i+1:02d}/{len(records)}] {fname} ({len(texts)} 行)")
+        else:
+            print(f"  [{i+1:02d}/{len(records)}] 第{leti}节 无字幕")
+    else:
+        print(f"  [{i+1:02d}/{len(records)}] HTTP {r.status_code}")
+
+print(f"\n完成: {ok}/{len(records)}")
+```
+
+## 已知课程
+
+| 课程 | teclId | 教师 | 节数 |
+|------|--------|------|------|
+| 统一机器人学1 | 149551 | 司伟, 魏志勇 | 84 |
+
+## 常见坑
+
+1. **Python 版本**: Windows 上 `python`（3.13），不用 `python3`（3.14 有代理 bug）。`s.trust_env = False`
+2. **Cookie path**: 3 个 cookie path 是 `/jy-application-resourcemanage/`。CDP 用 `Network.getAllCookies`
+3. **VPN**: 必须先连。浏览器在 VPN 之后启动，否则 `ERR_CONNECTION_CLOSED`
+4. **JS bundle 名随部署变**: 不硬编码。API 端点稳定，沿用已知列表
+5. **参数名**: courseId（字幕）vs courId（心跳）vs id（播放计数），不一致
+6. **跨平台**: `get_all_cookies.py` 自动检测 Edge/Chrome 路径和平台，一行命令搞定
+7. **PowerShell 内联 Python**: 引号冲突，超过 10 行写成 .py 文件再跑
+8. **无字幕**: 纯板书课/设备故障，约占 2-3%
