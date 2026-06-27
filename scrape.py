@@ -158,7 +158,9 @@ def check_vpn():
     """检测是否能到达 SEU 服务器"""
     print("① 检测 VPN 连通性...", end=" ")
     try:
-        r = requests.get("https://cvs.seu.edu.cn", timeout=TIMEOUT_SHORT)
+        s = requests.Session()
+        s.trust_env = False
+        r = s.get("https://cvs.seu.edu.cn", timeout=TIMEOUT_SHORT)
         # 403 也说明连通（无 cookie 被拒）
         if r.status_code in (200, 403, 302):
             print(green("OK"))
@@ -312,7 +314,7 @@ def main():
             print(f"\n{'课程名':30s} {'teclId':8s} {'教师':20s} {'学院'}")
             print("-" * 90)
             for teclId, name, teachers, org in results:
-                print(f"{name:30s} {teclId:8s} {', '.join(teachers):20s} {', '.join(org)}")
+                print(f"{name:30s} {str(teclId):8s} {', '.join(teachers):20s} {', '.join(org)}")
         else:
             print(yellow("未找到匹配课程"))
         sys.exit(0)
