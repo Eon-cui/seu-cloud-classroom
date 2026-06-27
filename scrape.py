@@ -28,11 +28,13 @@
   ① VPN → ② Cookie → ③ 课程列表 → ④ 显示周次 → ⑤ 用户确认范围 → ⑥ 下载
 """
 import requests, json, os, sys, ctypes, time
+from collections import Counter
 
+WEEK_DAY = ["一", "二", "三", "四", "五", "六", "日"]
+API_BASE = "https://cvs.seu.edu.cn/jy-application-resourcemanage"
+TIMEOUT_SHORT = 10
+TIMEOUT_LONG = 30
 
-# ═══════════════════════════════════════════════════════════
-# 工具函数
-# ═══════════════════════════════════════════════════════════
 
 def get_desktop():
     """获取真实桌面路径（处理 Windows 桌面重定向 / OneDrive）"""
@@ -56,39 +58,33 @@ def yellow(text):
     return f"\033[93m{text}\033[0m"
 
 
-# ═══════════════════════════════════════════════════════════
-# 周次过滤
-# ═══════════════════════════════════════════════════════════
-
 def parse_weeks(arg):
     """解析 --weeks 参数，返回 set of int。
     格式: "1-5" / "3" / "1-3,7,9-12"
-    非法输入打印错误并退出。
     """
     weeks = set()
     for part in arg.split(","):
         part = part.strip()
         if not part:
-            continue  # 容忍首尾逗号
+            continue
         try:
             if "-" in part:
                 a_str, b_str = part.split("-", 1)
                 a, b = int(a_str), int(b_str)
                 if a > b:
-                    a, b = b, a  # 自动交换反转范围
+                    a, b = b, a
                 weeks.update(range(a, b + 1))
             else:
                 weeks.add(int(part))
         except ValueError:
             print(red(f"无效周次: '{part}'"))
-            print("格式: --weeks 1-5 或 --weeks 3,7,10 或 --weeks 1-3,7,9-12")
+            print("格式: --weeks 1-5 或 --weeks 3,7,10")
             sys.exit(1)
     return weeks
 
 
 def show_week_summary(records):
     """打印周次分布，返回 (min_week, max_week)"""
-    from collections import Counter
     week_counts = Counter()
     for rec in records:
         wn = rec.get("weekNo")
@@ -129,15 +125,11 @@ def show_week_summary(records):
     return sorted_weeks[0], sorted_weeks[-1]
 
 
-# ═══════════════════════════════════════════════════════════
-# 检测点 ①：VPN 连通性
-# ═══════════════════════════════════════════════════════════
-
 def check_vpn():
     """检测是否能到达 SEU 服务器"""
     print("① 检测 VPN 连通性...", end=" ")
     try:
-        r = requests.get("https://cvs.seu.edu.cn", timeout=10)
+        r = requests.get("https://cvs.seu.edu.cn", timeout=TIMEOUT_SHORT)
         # 403 也说明连通（无 cookie 被拒）
         if r.status_code in (200, 403, 302):
             print(green("OK"))
@@ -159,15 +151,11 @@ def check_vpn():
     return False
 
 
-# ═══════════════════════════════════════════════════════════
-# 检测点 ②：Cookie 有效性
-# ═══════════════════════════════════════════════════════════
-
 def check_cookie(session, headers, base):
     """检测 cookie 是否有效"""
     print("② 检测 Cookie 有效性...", end=" ")
     try:
-        r = session.get(f"{base}/authority/me", headers=headers, timeout=10)
+        r = session.get(f"{base}/authority/me", headers=headers, timeout=TIMEOUT_SHORT)
         if r.status_code == 200:
             data = r.json()
             code = data.get("code")
@@ -195,10 +183,6 @@ def check_cookie(session, headers, base):
     return False
 
 
-# ═══════════════════════════════════════════════════════════
-# 检测点 ③：teclId 有效性
-# ═══════════════════════════════════════════════════════════
-
 def fetch_course_list(session, headers, base, teclId):
     """获取课程列表，返回 records 或 None"""
     print(f"③ 获取课程列表 (teclId={teclId})...", end=" ")
@@ -210,7 +194,7 @@ def fetch_course_list(session, headers, base, teclId):
             "page.orders[0].asc": "false",
             "page.orders[0].field": "courBeginTime",
             "schoolOpenStatusFlag": "false",
-        }, timeout=30)
+        }, timeout=TIMEOUT_LONG)
 
         if r.status_code != 200:
             print(red(f"HTTP {r.status_code}"))
@@ -245,41 +229,37 @@ def fetch_course_list(session, headers, base, teclId):
         return None
 
 
-# ═══════════════════════════════════════════════════════════
-# 主流程
-# ═══════════════════════════════════════════════════════════
-
 def main():
     # ── 参数 ──
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    flags = [a for a in sys.argv[1:] if a.startswith("--")]
+    positional = []
+    week_filter = None
+    dry_run = False
 
-    if len(args) < 2:
+    i = 1
+    while i < len(sys.argv):
+        a = sys.argv[i]
+        if a == "--dry-run":
+            dry_run = True
+        elif a == "--weeks":
+            i += 1
+            if i < len(sys.argv):
+                week_filter = parse_weeks(sys.argv[i])
+        elif a.startswith("--weeks="):
+            week_filter = parse_weeks(a.split("=", 1)[1])
+        elif not a.startswith("--"):
+            positional.append(a)
+        i += 1
+
+    if len(positional) < 2:
         print("用法: python scrape.py <teclId> <课程名> [教师名] [--weeks 范围] [--dry-run]")
         print("示例:")
         print("  python scrape.py 149551 统一机器人学1 司伟 --weeks 1-5")
         print("  python scrape.py 149551 统一机器人学1 司伟 --dry-run")
         sys.exit(1)
 
-    teclId = args[0]
-    course_name = args[1]
-    teacher = args[2] if len(args) > 2 else ""
-
-    # 解析 --weeks
-    week_filter = None
-    for f in flags:
-        if f.startswith("--weeks="):
-            week_filter = parse_weeks(f.split("=", 1)[1])
-        elif f == "--weeks":
-            # 下一个 arg 是值（如果没有 = 的话需要特殊处理）
-            pass
-
-    # 也支持位置参数风格的 --weeks（与值分开）
-    for i, a in enumerate(sys.argv[1:], 1):
-        if a == "--weeks" and i < len(sys.argv) - 1:
-            week_filter = parse_weeks(sys.argv[i + 1])
-
-    dry_run = "--dry-run" in sys.argv
+    teclId = positional[0]
+    course_name = positional[1]
+    teacher = positional[2] if len(positional) > 2 else ""
 
     print(f"目标: {course_name} ({teacher or '未知教师'}) | teclId={teclId}")
     if week_filter:
@@ -314,14 +294,12 @@ def main():
         "Accept": "application/json",
     }
 
-    base = "https://cvs.seu.edu.cn/jy-application-resourcemanage"
-
     # ── 检测 ②：Cookie ──
-    if not check_cookie(s, headers, base):
+    if not check_cookie(s, headers, API_BASE):
         sys.exit(3)
 
     # ── 检测 ③：课程列表 ──
-    records = fetch_course_list(s, headers, base, teclId)
+    records = fetch_course_list(s, headers, API_BASE, teclId)
     if not records:
         sys.exit(4)
 
@@ -367,7 +345,6 @@ def main():
     records = filtered
 
     # ── 输出目录 ──
-    WEEK_DAY = ["一", "二", "三", "四", "五", "六", "日"]
     label = f"{course_name}_{teacher}".rstrip("_")
     output_dir = os.path.join(get_desktop(), f"{label}_字幕爬取")
     os.makedirs(output_dir, exist_ok=True)
@@ -398,8 +375,8 @@ def main():
         os.makedirs(lesson_dir, exist_ok=True)
 
         try:
-            r = s.get(f"{base}/v1/course_vod_subtitle", headers=headers,
-                       params={"courseId": rid}, timeout=30)
+            r = s.get(f"{API_BASE}/v1/course_vod_subtitle", headers=headers,
+                       params={"courseId": rid}, timeout=TIMEOUT_LONG)
 
             if r.status_code == 200 and len(r.content) > 100:
                 items = r.json().get("data") or []  # .get("data", []) 遇 null 返回 None

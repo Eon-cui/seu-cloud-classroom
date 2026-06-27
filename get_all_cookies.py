@@ -163,23 +163,6 @@ def main():
 
     time.sleep(1)
 
-    # 用户数据目录：保持登录态
-    if IS_WIN:
-        if "edge" in browser_name.lower():
-            user_data = os.path.expandvars("%LOCALAPPDATA%\\Microsoft\\Edge\\User Data")
-        else:
-            user_data = os.path.expandvars("%LOCALAPPDATA%\\Google\\Chrome\\User Data")
-    elif IS_MAC:
-        if "edge" in browser_name.lower():
-            user_data = os.path.expanduser("~/Library/Application Support/Microsoft Edge")
-        else:
-            user_data = os.path.expanduser("~/Library/Application Support/Google/Chrome")
-    else:
-        if "edge" in browser_name.lower():
-            user_data = os.path.expanduser("~/.config/microsoft-edge")
-        else:
-            user_data = os.path.expanduser("~/.config/google-chrome")
-
     print(f"启动 {browser_name}（debug 端口 {CDP_PORT}）...")
 
     # 先开 SEU 页面，再开新标签到 SEU（确保有窗口可连）
@@ -217,7 +200,7 @@ def main():
 
 
 def save(found):
-    save_path = os.path.join(os.path.dirname(__file__), "seu_cookies.json")
+    save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seu_cookies.json")
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     with open(save_path, "w") as f:
         json.dump(found, f, indent=2)

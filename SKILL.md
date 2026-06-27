@@ -46,10 +46,11 @@ python scrape.py <teclId> <课程名> <教师名>
 若 `scrape.py` 退出码=3（Cookie 过期），自动执行：
 
 ```bash
-python get_all_cookies.py
+python get_all_cookies.py --force
 ```
 
 脚本自动：检测 OS → 找 Edge/Chrome → 关旧实例 → 开 CDP → 打开 SEU → 等用户登录 → 保存 cookie。
+**注意**: 必须先问用户"会关闭浏览器，确定？"，确认后才加 `--force`。
 
 **支持**: Windows / macOS / Linux，Edge / Chrome / Chromium 全兼容。
 
@@ -233,95 +234,9 @@ API 前缀：`https://cvs.seu.edu.cn/jy-application-resourcemanage`
 
 `transferType=1` = AI 语音识别生成。
 
-## 字幕下载代码（内联版）
+## 字幕下载代码
 
-当 `scrape.py` 不可用时，直接跑这段：
-
-```python
-import requests, json, os, sys
-
-if len(sys.argv) < 3:
-    print("用法: python scrape.py <teclId> <课程名> [教师名]")
-    sys.exit(1)
-
-# 加载 cookie
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "seu_cookies.json")) as f:
-    cookies = json.load(f)
-
-s = requests.Session()
-s.cookies.update(cookies)
-s.trust_env = False
-
-h = {
-    "User-Agent": "Mozilla/5.0",
-    "Referer": "https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/",
-    "X-Requested-With": "XMLHttpRequest",
-    "Accept": "application/json",
-}
-
-base = "https://cvs.seu.edu.cn/jy-application-resourcemanage"
-teclId = sys.argv[1]  # 从命令行参数取
-course_name = sys.argv[2] if len(sys.argv) > 2 else "course"
-teacher = sys.argv[3] if len(sys.argv) > 3 else ""
-
-# 获取课程列表
-r = s.get(f"{base}/v1/subject_vod_list_new", headers=h, params={
-    "teclIds": teclId,
-    "page.pageIndex": 1,
-    "page.pageSize": 200,
-    "page.orders[0].asc": "false",
-    "page.orders[0].field": "courBeginTime",
-    "schoolOpenStatusFlag": "false",
-})
-data = r.json()
-records = data["data"]["records"]
-print(f"共 {len(records)} 节")
-
-# 下载字幕
-# ── 桌面路径（Windows 可能重定向 Desktop 文件夹）──
-import ctypes
-def get_desktop():
-    if os.name == "nt":
-        buf = ctypes.create_unicode_buffer(260)
-        ctypes.windll.shell32.SHGetFolderPathW(None, 0, None, 0, buf)
-        return buf.value
-    return os.path.expanduser("~/Desktop")
-
-label = f"{course_name}_{teacher}".rstrip("_")
-output_dir = os.path.join(get_desktop(), f"{label}_字幕爬取")
-os.makedirs(output_dir, exist_ok=True)
-
-WEEK_DAY = ["一", "二", "三", "四", "五", "六", "日"]
-
-ok = 0
-for i, rec in enumerate(records):
-    rid = rec["id"]
-    leti = rec.get("letiNumber", i + 1)
-    date = rec.get("courBeginTime", "")[:10]
-    week_no = rec.get("weekNo", "?")
-    week_day_num = rec.get("week", 0)
-    week_day_name = WEEK_DAY[week_day_num - 1] if 1 <= week_day_num <= 7 else str(week_day_num)
-
-    lesson_dir = os.path.join(output_dir, f"第{week_no}周_周{week_day_name}_第{leti}节")
-    os.makedirs(lesson_dir, exist_ok=True)
-    
-    r = s.get(f"{base}/v1/course_vod_subtitle", headers=h, params={"courseId": rid})
-    if r.status_code == 200 and len(r.content) > 100:
-        items = r.json().get("data", [])
-        texts = [it["res"].strip() for it in items if it.get("res", "").strip()]
-        if texts:
-            fpath = os.path.join(lesson_dir, f"{date}_字幕.txt")
-            with open(fpath, "w", encoding="utf-8") as f:
-                f.write("\n".join(texts))
-            ok += 1
-            print(f"  [{i+1:02d}/{len(records)}] 第{week_no}周_周{week_day_name}_第{leti}节 ({len(texts)} 行)")
-        else:
-            print(f"  [{i+1:02d}/{len(records)}] 第{leti}节 无字幕")
-    else:
-        print(f"  [{i+1:02d}/{len(records)}] HTTP {r.status_code}")
-
-print(f"\n完成: {ok}/{len(records)}")
-```
+如果 `scrape.py` 不可用，**读取 scrape.py 源码直接执行**（不要用内联版——内联版过时且功能不全）。
 
 ## 已知课程
 
