@@ -126,29 +126,39 @@ def show_week_summary(records):
 
 
 def search_courses(keyword, session, headers):
-    """按课程名搜索全部教学班，返回 [(teclId, subjName, teachers, orgaNames)]
+    """按课程名搜索全部教学班，翻页拿全量。
     用 group_subject_vod_list——能返回所有班级，不受当前用户选课限制。
+    返回 [(teclId, subjName, subjCode, teachers, orgaNames)]
     """
-    print(f"搜索课程「{keyword}」...", end=" ")
+    print(f"搜索课程「{keyword}」...", end=" ", flush=True)
     try:
-        r = session.get(f"{API_BASE}/v1/group_subject_vod_list", headers=headers, params={
-            "subjName": keyword,
-            "page.pageIndex": 1,
-            "page.pageSize": 50,
-        }, timeout=TIMEOUT_SHORT)
-        data = r.json()
-        records = data.get("data", {}).get("records", [])
         seen = set()
         results = []
-        for rec in records:
-            teclId = rec.get("teclId")
-            name = rec.get("subjName", "?")
-            teachers = rec.get("teacNames", [])  # group 端点用 teacNames 不是 teclTeacNames
-            org = rec.get("orgaNames", [])
-            key = (teclId, name)
-            if key not in seen:
-                seen.add(key)
-                results.append((teclId, name, teachers, org))
+        for page in range(1, 20):
+            r = session.get(f"{API_BASE}/v1/group_subject_vod_list", headers=headers, params={
+                "subjName": keyword,
+                "page.pageIndex": page,
+                "page.pageSize": 50,
+            }, timeout=TIMEOUT_SHORT)
+            data = r.json()
+            records = data.get("data", {}).get("records", [])
+            if not records:
+                break
+            for rec in records:
+                teclId = rec.get("teclId")
+                name = rec.get("subjName", "?")
+                if (teclId, name) in seen:
+                    continue
+                seen.add((teclId, name))
+                results.append((
+                    teclId,
+                    name,
+                    rec.get("subjCode", "?"),
+                    rec.get("teacNames", []),
+                    rec.get("orgaNames", []),
+                ))
+            if len(records) < 50:
+                break
         print(green(f"{len(results)} 条"))
         return results
     except Exception as e:
@@ -313,10 +323,11 @@ def main():
             "Accept": "application/json",
         })
         if results:
-            print(f"\n{'课程名':30s} {'teclId':8s} {'教师':20s} {'学院'}")
+            print(f"\n{'课程名':28s} {'编号':10s} {'teclId':8s} {'教师'}")
             print("-" * 90)
-            for teclId, name, teachers, org in results:
-                print(f"{name:30s} {str(teclId):8s} {', '.join(teachers):20s} {', '.join(org)}")
+            for teclId, name, code, teachers, org in results:
+                print(f"{name:28s} {code:10s} {str(teclId):8s} {', '.join(teachers)}")
+            print(f"\n共 {len(results)} 个教学班。下载时须指定 teclId。")
         else:
             print(yellow("未找到匹配课程"))
         sys.exit(0)
