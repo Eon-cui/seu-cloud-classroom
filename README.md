@@ -11,7 +11,7 @@
 ## 安装
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/seu-cloud-classroom.git
+git clone https://github.com/Eon-cui/seu-cloud-classroom.git
 cd seu-cloud-classroom
 pip install -r requirements.txt
 ```
