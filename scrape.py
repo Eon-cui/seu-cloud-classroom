@@ -27,7 +27,7 @@
 检测流程:
   ① VPN → ② Cookie → ③ 课程列表 → ④ 显示周次 → ⑤ 用户确认范围 → ⑥ 下载
 """
-import requests, json, os, sys, ctypes, time
+import requests, json, os, sys, ctypes
 from collections import Counter
 
 WEEK_DAY = ["一", "二", "三", "四", "五", "六", "日"]
@@ -140,6 +140,9 @@ def check_vpn():
     except requests.exceptions.ConnectionError:
         print(red("连接失败"))
         print(red("  → 无法连接 cvs.seu.edu.cn"))
+    except requests.exceptions.SSLError:
+        print(red("SSL 错误"))
+        print(red("  → VPN 可能在做证书劫持，检查 VPN 配置"))
     except Exception as e:
         print(red(f"异常: {e}"))
 

@@ -35,10 +35,10 @@ python scrape.py <teclId> <课程名> <教师名>
 | 1 | 参数缺失 | 检查参数 |
 | 2 | VPN 未连接 | 提醒用户连接 SEU VPN，等待确认后重试 |
 | 3 | Cookie 过期 | 问用户"要重新提取 Cookie 吗？（会关闭浏览器）"→ 确认后跑 `get_all_cookies.py --force` |
-| 7 | 缺少 --force | `get_all_cookies.py` 需要 `--force` 才会杀浏览器。先问用户确认 |
 | 4 | teclId 无效 | 让用户在浏览器打开课程页，从 URL 提取 teclId |
 | 5 | 部分失败 | 报告失败数量，建议重试 |
 | 6 | 未指定周次 | **显示周次分布后，问用户要爬第几周到第几周，拿到答案后加 `--weeks` 重跑** |
+| 7 | 缺少 --force | `get_all_cookies.py` 需要 `--force` 才会杀浏览器。先问用户确认 |
 
 ### 步骤 1：拿 Cookie
 

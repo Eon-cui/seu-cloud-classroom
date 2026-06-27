@@ -161,7 +161,7 @@ def main():
         for proc in ["Microsoft Edge", "Google Chrome"]:
             subprocess.run(["pkill", "-f", proc], capture_output=True)
 
-    time.sleep(1)
+    time.sleep(3)  # 等浏览器完全释放锁
 
     print(f"启动 {browser_name}（debug 端口 {CDP_PORT}）...")
 
