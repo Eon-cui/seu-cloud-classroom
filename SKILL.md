@@ -19,6 +19,11 @@ description: >
 
 用户给课程名 → 你自动执行以下步骤。**每个步骤用现有的 Python 脚本，不要重写。**
 
+**核心原则——不留中间产物**：
+- 调试脚本、截图、临时 JSON——任务完成后立即 `Remove-Item`
+- 只保留：`seu_cookies.json`（凭证）、字幕文件（用户要的产出）、备考大纲（用户要的产出）
+- Python `__pycache__/` 每次跑完清掉
+
 ### 步骤 0：检查环境
 
 `scrape.py` 内置三道检测——运行即检测，失败自动报原因：
@@ -254,3 +259,4 @@ API 前缀：`https://cvs.seu.edu.cn/jy-application-resourcemanage`
 6. **跨平台**: `get_all_cookies.py` 自动检测 Edge/Chrome 路径和平台，一行命令搞定
 7. **PowerShell 内联 Python**: 引号冲突，超过 10 行写成 .py 文件再跑
 8. **无字幕**: 纯板书课/设备故障，约占 2-3%
+9. **清理中间产物**: 任务完成立即删除临时脚本/截图/JSON，只留 cookie + 字幕 + 大纲
