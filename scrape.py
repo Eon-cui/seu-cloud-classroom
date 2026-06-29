@@ -2,11 +2,13 @@
 
 用法:
   python scrape.py --search <关键词>                       # 搜索课程，返回 teclId
+  python scrape.py --search <关键词> --teacher <教师>     # 搜索 + 教师过滤
   python scrape.py <teclId> <课程名> [教师名] [--weeks 范围]
   python scrape.py <teclId> <课程名> [教师名] --dry-run
 
 示例:
   python scrape.py --search 统一机器人                      # 搜课程
+  python scrape.py --search 统一机器人 --teacher 司伟      # 搜 + 教师过滤
   python scrape.py 149551 统一机器人学1 司伟 --weeks 1-5    # 第1~5周
 
 输出结构:
@@ -32,7 +34,7 @@ from collections import Counter
 
 WEEK_DAY = ["一", "二", "三", "四", "五", "六", "日"]
 API_BASE = "https://cvs.seu.edu.cn/jy-application-resourcemanage"
-TIMEOUT_SHORT = 10
+TIMEOUT_SHORT = 30
 TIMEOUT_LONG = 30
 
 
@@ -43,6 +45,29 @@ def get_desktop():
         ctypes.windll.shell32.SHGetFolderPathW(None, 0, None, 0, buf)
         return buf.value
     return os.path.expanduser("~/Desktop")
+
+
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Referer": "https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/",
+    "X-Requested-With": "XMLHttpRequest",
+    "Accept": "application/json",
+}
+
+
+def check_dependencies():
+    """检查运行所需依赖包，缺啥打啥"""
+    missing = []
+    for pkg in ("requests", "websocket-client"):
+        try:
+            __import__(pkg.replace("-", "_"))
+        except ImportError:
+            missing.append(pkg)
+    if missing:
+        print(red(f"缺少依赖: {', '.join(missing)}"))
+        print(yellow(f"安装: pip install {' '.join(missing)}"))
+        return False
+    return True
 
 
 def red(text):
@@ -128,7 +153,8 @@ def show_week_summary(records):
 def search_courses(keyword, session, headers):
     """按课程名搜索全部教学班，翻页拿全量。
     用 group_subject_vod_list——能返回所有班级，不受当前用户选课限制。
-    返回 [(teclId, subjName, subjCode, teachers, orgaNames)]
+    返回 [(teclId, subjName, subjCode, teachers, orgaNames, year)]
+    year 如 "2025-2026"
     """
     print(f"搜索课程「{keyword}」...", end=" ", flush=True)
     try:
@@ -156,6 +182,7 @@ def search_courses(keyword, session, headers):
                     rec.get("subjCode", "?"),
                     rec.get("teacNames", []),
                     rec.get("orgaNames", []),
+                    f"{rec.get('acyeBeginYear','?')}-{rec.get('acyeEndYear','?')}",
                 ))
             if len(records) < 50:
                 break
@@ -276,11 +303,19 @@ def fetch_course_list(session, headers, base, teclId):
 
 
 def main():
+    # ── Windows 终端 UTF-8 ──
+    if os.name == "nt" and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+
+    # ── 依赖检查 ──
+    check_dependencies()
+
     # ── 参数 ──
     positional = []
     week_filter = None
     dry_run = False
     search_term = None
+    teacher_filter = None
 
     i = 1
     while i < len(sys.argv):
@@ -293,6 +328,12 @@ def main():
                 search_term = sys.argv[i]
         elif a.startswith("--search="):
             search_term = a.split("=", 1)[1]
+        elif a == "--teacher":
+            i += 1
+            if i < len(sys.argv):
+                teacher_filter = sys.argv[i]
+        elif a.startswith("--teacher="):
+            teacher_filter = a.split("=", 1)[1]
         elif a == "--weeks":
             i += 1
             if i < len(sys.argv):
@@ -316,17 +357,30 @@ def main():
         s = requests.Session()
         s.cookies.update(cookies)
         s.trust_env = False
-        results = search_courses(search_term, s, {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/",
-            "X-Requested-With": "XMLHttpRequest",
-            "Accept": "application/json",
-        })
+        # Cookie 预检
+        if not check_cookie(s, DEFAULT_HEADERS, API_BASE):
+            sys.exit(3)
+        results = search_courses(search_term, s, DEFAULT_HEADERS)
+        # ── 教师过滤 ──
+        if teacher_filter and results:
+            filtered = []
+            for rec in results:
+                # rec[3] = teachers list
+                teachers_str = " ".join(rec[3]).lower()
+                if teacher_filter.lower() in teachers_str:
+                    filtered.append(rec)
+            if not filtered:
+                print(yellow(f"未找到教师「{teacher_filter}」的课程，显示全部结果:"))
+            else:
+                print(green(f"教师「{teacher_filter}」匹配 {len(filtered)} 个教学班"))
+                results = filtered
+
         if results:
-            print(f"\n{'课程名':28s} {'编号':10s} {'teclId':8s} {'教师'}")
+            print(f"\n{'#':3s} {'teclId':8s} {'学年':11s} {'教师':20s} {'课程名'}")
             print("-" * 90)
-            for teclId, name, code, teachers, org in results:
-                print(f"{name:28s} {code:10s} {str(teclId):8s} {', '.join(teachers)}")
+            for idx, rec in enumerate(results, 1):
+                teclId, name, code, teachers, org, year = rec
+                print(f"{idx:<3d} {str(teclId):8s} {year:11s} {', '.join(teachers):20s} {name}")
             print(f"\n共 {len(results)} 个教学班。下载时须指定 teclId。")
         else:
             print(yellow("未找到匹配课程"))
@@ -335,6 +389,7 @@ def main():
     if len(positional) < 2:
         print("用法:")
         print("  python scrape.py --search <关键词>                    # 搜索课程")
+        print("  python scrape.py --search <关键词> --teacher <教师>   # 搜索 + 教师过滤")
         print("  python scrape.py <teclId> <课程名> [教师名] [--weeks 范围]")
         print("  python scrape.py <teclId> <课程名> [教师名] --dry-run")
         sys.exit(1)
@@ -369,15 +424,8 @@ def main():
     s.cookies.update(cookies)
     s.trust_env = False
 
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/",
-        "X-Requested-With": "XMLHttpRequest",
-        "Accept": "application/json",
-    }
-
     # ── 检测 ②：Cookie ──
-    if not check_cookie(s, headers, API_BASE):
+    if not check_cookie(s, DEFAULT_HEADERS, API_BASE):
         sys.exit(3)
 
     # ── 检测 ③：课程列表 ──
@@ -457,7 +505,7 @@ def main():
         os.makedirs(lesson_dir, exist_ok=True)
 
         try:
-            r = s.get(f"{API_BASE}/v1/course_vod_subtitle", headers=headers,
+            r = s.get(f"{API_BASE}/v1/course_vod_subtitle", headers=DEFAULT_HEADERS,
                        params={"courseId": rid}, timeout=TIMEOUT_LONG)
 
             if r.status_code == 200 and len(r.content) > 100:
