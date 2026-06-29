@@ -247,7 +247,8 @@ API 前缀：`https://cvs.seu.edu.cn/jy-application-resourcemanage`
 
 | API | 参数 | 用途 |
 |-----|------|------|
-| `/v1/subject_vod_list_new` | `teclIds`, `page.*` | 课程节次列表 |
+| `/v1/group_subject_vod_list` | `subjName`, `page.*` | 搜索全部教学班 |
+| `/v1/subject_vod_list_new` | `teclIds`, `page.*` | 课程节次列表（下载用） |
 | `/v1/course_vod_subtitle` | `courseId={recordId}` | 字幕 JSON |
 | `/v1/vod/playCount` | `id={recordId}` | 播放次数 |
 | `/v1/vod/keepAlive` | POST `{"courId": recordId}` | 心跳 |
@@ -276,14 +277,6 @@ API 前缀：`https://cvs.seu.edu.cn/jy-application-resourcemanage`
 ## 字幕下载代码
 
 如果 `scrape.py` 不可用，**读取 scrape.py 源码直接执行**（不要用内联版——内联版过时且功能不全）。
-
-## 已知课程
-
-| 课程 | teclId | 教师 | 节数 |
-|------|--------|------|------|
-| 统一机器人学Ⅰ | 149550 | 王玉娟 | 84 |
-| 统一机器人学Ⅰ | 149551 | 魏志勇, 司伟 | 84 |
-| 统一机器人学Ⅰ | 149552 | 毕可东, 阚亚鲸 | 84 |
 
 ## 常见坑
 

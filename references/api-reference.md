@@ -56,7 +56,7 @@ API 前缀: `https://cvs.seu.edu.cn/jy-application-resourcemanage`
 | 端点 | 方法 | 关键参数 | 返回 |
 |------|------|------|------|
 | `/v1/subject_vod_list_new` | GET | `teclIds`, `page.pageIndex`, `page.pageSize` | `{data: {records: [...], rowCount: N, pageCount: N}}` |
-| `/v1/group_subject_vod_list/t-1` | GET | `teclId` 或 `subjId` | 同上结构 |
+| `/v1/group_subject_vod_list` | GET | `subjName`, `page.*` | 搜索全部教学班，不受选课限制 |
 
 ### 字幕
 
@@ -126,6 +126,4 @@ vodDisplayStatus: int → 显示状态（5=显示）
 
 ## 已知课程
 
-| 课程 | teclId | subjId | 教师 | 节数 |
-|------|--------|--------|------|------|
-| 统一机器人学Ⅰ | 149551 | 17071 | 司伟, 魏志勇 | 84 |
+使用 `scrape.py --search <关键词>` 搜索，不维护静态列表。
