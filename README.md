@@ -83,6 +83,7 @@ seu-cloud-classroom/
 ├── requirements.txt         # Python 依赖
 ├── LICENSE                  # MIT
 ├── .gitignore               # 排除 cookie 文件 + 临时文件
+├── .gitattributes           # 统一 LF 行尾
 └── README.md                # 你正在看的
 ```
 
