@@ -5,11 +5,15 @@
   python scrape.py --search <关键词> --teacher <教师>     # 搜索 + 教师过滤
   python scrape.py <teclId> <课程名> [教师名] [--weeks 范围]
   python scrape.py <teclId> <课程名> [教师名] --dry-run
+  python scrape.py <teclId> <课程名> [教师名] --diagnose     # 逐节看转写状态（查为什么空）
+  python scrape.py <teclId> <课程名> [教师名] --weeks 1-7 --resume   # 只补没下到的
+  python scrape.py <teclId> <课程名> [教师名] --weeks 1-7 --out DIR  # 自定义输出目录
 
 示例:
   python scrape.py --search 统一机器人                      # 搜课程
   python scrape.py --search 统一机器人 --teacher 司伟      # 搜 + 教师过滤
   python scrape.py 149551 统一机器人学1 司伟 --weeks 1-5    # 第1~5周
+  python scrape.py 159915 统一机器人学Ⅱ 祝小元 --diagnose   # 看哪些节还没转写
 
 输出结构:
   ~/Desktop/统一机器人学1_司伟_字幕爬取/
@@ -37,6 +41,69 @@ API_BASE = "https://cvs.seu.edu.cn/jy-application-resourcemanage"
 TIMEOUT_SHORT = 30
 TIMEOUT_LONG = 30
 
+# transcriptOptimizeTaskStatus：决定这一节有没有字幕
+TRANSCRIPT_STATUS = {
+    0: "转写未开始/排队中",
+    1: "转写中",
+    3: "转写完成",
+    4: "转写失败/待重试",
+    6: "转写完成(优化版)",
+}
+
+
+def transcript_status_label(rec):
+    """把 transcriptOptimizeTaskStatus 翻成人话"""
+    s = rec.get("transcriptOptimizeTaskStatus")
+    if s is None:
+        return "已完成(旧数据)"
+    return TRANSCRIPT_STATUS.get(s, f"未知({s})")
+
+
+def fetch_subtitle(session, rid):
+    """取单节字幕文本列表；失败返回 None，空字幕返回 []"""
+    try:
+        r = session.get(
+            f"{API_BASE}/v1/course_vod_subtitle",
+            headers=DEFAULT_HEADERS,
+            params={"courseId": rid},
+            timeout=TIMEOUT_LONG,
+        )
+        if r.status_code != 200:
+            return None
+        items = r.json().get("data") or []
+        return [it["res"].strip() for it in items if it.get("res", "").strip()]
+    except Exception:
+        return None
+
+
+def diagnose(session, records):
+    """逐节打印转写状态 + 字幕条数，用于判断"空"是服务端没转写还是本地漏下"""
+    print(f"\n{'周':>3} {'节':>3} {'日期':11} {'状态':18} {'字幕条数':>8}  教师")
+    print("-" * 76)
+    empty = []
+    for rec in records:
+        texts = fetch_subtitle(session, rec["id"])
+        n = "ERR" if texts is None else str(len(texts))
+        if not texts:
+            empty.append(rec)
+        label = transcript_status_label(rec)
+        print(
+            f"{str(rec.get('weekNo')):>3} {str(rec.get('letiNumber')):>3} "
+            f"{str(rec.get('courBeginTime'))[:10]:11} {label:18} {n:>8}  "
+            f"{', '.join(rec.get('teacNames') or [])}"
+        )
+    print("-" * 76)
+    if empty:
+        by_status = Counter(transcript_status_label(r) for r in empty)
+        print(f"共 {len(records)} 节，其中 {len(empty)} 节没有字幕：")
+        for k, v in by_status.most_common():
+            print(f"  {v} 节 → {k}")
+        print("  状态 0/1/4 是服务端还没转写完，过几天用 --weeks ... --resume 重跑即可；")
+        print("  若长期是 4（失败），只能等老师/平台侧重跑转写。")
+    else:
+        print(f"共 {len(records)} 节，全部有字幕。")
+
+
 
 def get_desktop():
     """获取真实桌面路径（处理 Windows 桌面重定向 / OneDrive）"""
@@ -58,9 +125,9 @@ DEFAULT_HEADERS = {
 def check_dependencies():
     """检查运行所需依赖包，缺啥打啥"""
     missing = []
-    for pkg in ("requests", "websocket-client"):
+    for mod, pkg in (("requests", "requests"), ("websocket", "websocket-client")):
         try:
-            __import__(pkg.replace("-", "_"))
+            __import__(mod)
         except ImportError:
             missing.append(pkg)
     if missing:
@@ -316,6 +383,9 @@ def main():
     dry_run = False
     search_term = None
     teacher_filter = None
+    diagnose_only = False
+    resume = False
+    out_dir = None
 
     i = 1
     while i < len(sys.argv):
@@ -340,6 +410,16 @@ def main():
                 week_filter = parse_weeks(sys.argv[i])
         elif a.startswith("--weeks="):
             week_filter = parse_weeks(a.split("=", 1)[1])
+        elif a == "--diagnose":
+            diagnose_only = True
+        elif a == "--resume":
+            resume = True
+        elif a == "--out":
+            i += 1
+            if i < len(sys.argv):
+                out_dir = sys.argv[i]
+        elif a.startswith("--out="):
+            out_dir = a.split("=", 1)[1]
         elif not a.startswith("--"):
             positional.append(a)
         i += 1
@@ -392,6 +472,9 @@ def main():
         print("  python scrape.py --search <关键词> --teacher <教师>   # 搜索 + 教师过滤")
         print("  python scrape.py <teclId> <课程名> [教师名] [--weeks 范围]")
         print("  python scrape.py <teclId> <课程名> [教师名] --dry-run")
+        print("  python scrape.py <teclId> <课程名> [教师名] --diagnose    # 逐节看转写状态")
+        print("  python scrape.py <teclId> <课程名> [教师名] --weeks 1-7 --resume")
+        print("  python scrape.py <teclId> <课程名> [教师名] --weeks 1-7 --out DIR")
         sys.exit(1)
 
     teclId = positional[0]
@@ -403,6 +486,10 @@ def main():
         print(f"周次: {sorted(week_filter)}")
     if dry_run:
         print("模式: 只查看（不下载）")
+    if diagnose_only:
+        print("模式: 逐节诊断（只读）")
+    if resume:
+        print("模式: 断点续爬（已存在的字幕跳过）")
     print("=" * 50)
 
     # ── 检测 ①：VPN ──
@@ -429,7 +516,7 @@ def main():
         sys.exit(3)
 
     # ── 检测 ③：课程列表 ──
-    records = fetch_course_list(s, headers, API_BASE, teclId)
+    records = fetch_course_list(s, DEFAULT_HEADERS, API_BASE, teclId)
     if not records:
         sys.exit(4)
 
@@ -445,6 +532,12 @@ def main():
 
     # ── 周次分布 ──
     min_week, max_week = show_week_summary(records)
+
+    # ── --diagnose：逐节看转写状态（判断"空"是平台没转写还是本地漏下）──
+    if diagnose_only:
+        target = [r for r in records if week_filter is None or r.get("weekNo") in week_filter]
+        diagnose(s, target)
+        sys.exit(0)
 
     # ── dry-run：只显示不下载 ──
     if dry_run:
@@ -476,7 +569,7 @@ def main():
 
     # ── 输出目录 ──
     label = f"{course_name}_{teacher}".rstrip("_")
-    output_dir = os.path.join(get_desktop(), f"{label}_字幕爬取")
+    output_dir = out_dir or os.path.join(get_desktop(), f"{label}_字幕爬取")
     os.makedirs(output_dir, exist_ok=True)
     print(f"输出: {output_dir}")
 
@@ -487,6 +580,8 @@ def main():
     ok = 0
     empty = 0
     failed = 0
+    skipped = 0
+    empty_recs = []
 
     for i, rec in enumerate(records):
         rid = rec["id"]
@@ -504,6 +599,14 @@ def main():
         lesson_dir = os.path.join(output_dir, lesson_dir_name)
         os.makedirs(lesson_dir, exist_ok=True)
 
+        # --resume：本地已有非空字幕就跳过（省一次 API 请求）
+        if resume:
+            fpath = os.path.join(lesson_dir, f"{date}_字幕.txt")
+            if os.path.exists(fpath) and os.path.getsize(fpath) > 200:
+                skipped += 1
+                print(f"  [{i+1:02d}/{len(records)}] {green('跳过')} {lesson_dir_name} 已存在")
+                continue
+
         try:
             r = s.get(f"{API_BASE}/v1/course_vod_subtitle", headers=DEFAULT_HEADERS,
                        params={"courseId": rid}, timeout=TIMEOUT_LONG)
@@ -520,7 +623,9 @@ def main():
                     print(f"  [{i+1:02d}/{len(records)}] {green('OK')} {lesson_dir_name}/{fname} ({len(texts)} 行)")
                 else:
                     empty += 1
-                    print(f"  [{i+1:02d}/{len(records)}] {yellow('空')} {lesson_dir_name} 无字幕数据")
+                    empty_recs.append(rec)
+                    print(f"  [{i+1:02d}/{len(records)}] {yellow('空')} {lesson_dir_name} 无字幕数据"
+                          f"（{transcript_status_label(rec)}）")
             else:
                 failed += 1
                 print(f"  [{i+1:02d}/{len(records)}] {red(f'HTTP {r.status_code}')} {lesson_dir_name}")
@@ -532,14 +637,26 @@ def main():
     print(f"\n{'=' * 50}")
     print(f"完成: {green(str(ok))} 有字幕, "
           f"{yellow(str(empty))} 空, "
-          f"{red(str(failed))} 失败")
+          f"{red(str(failed))} 失败"
+          + (f", 跳过 {skipped} 已存在" if resume else ""))
     print(f"目录: {output_dir}")
+
+    # ── 空字幕归因：告诉用户是平台没转写，不是本地漏下 ──
+    if empty_recs:
+        by_status = Counter(transcript_status_label(r) for r in empty_recs)
+        print(f"\n{yellow(f'{len(empty_recs)} 节没有字幕，服务端状态：')}")
+        for k, v in by_status.most_common():
+            print(f"  {v} 节 → {k}")
+        print("  0/1/4 属于平台侧还没转写完，过几天补跑：")
+        weeks = sorted({r.get("weekNo") for r in empty_recs if r.get("weekNo") is not None})
+        wk = ",".join(str(w) for w in weeks) if weeks else "1-20"
+        print(f"  python scrape.py {teclId} \"{course_name}\" \"{teacher}\" --weeks {wk} --resume")
 
     if failed > 0 and ok == 0:
         print(red("\n全部失败！可能是网络波动或 API 限流，稍后重试。"))
         sys.exit(5)
     elif failed > 0:
-        print(yellow(f"\n{failed} 节失败，可以重新运行脚本重试（已下载的会覆盖）。"))
+        print(yellow(f"\n{failed} 节失败，可以加 --resume 重跑补漏（已下载的会自动跳过）。"))
         sys.exit(5)
 
     sys.exit(0)
