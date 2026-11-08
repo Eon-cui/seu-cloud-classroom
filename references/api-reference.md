@@ -25,22 +25,26 @@
 
 ### 方法 1: CDP 自动提取（推荐）
 
+```bash
+python get_all_cookies.py            # 另开独立 profile 窗口，等登录，自动取 + 校验
+python get_all_cookies.py --attach   # 已有带 CDP 的浏览器在跑，直接取
+```
+
+脚本内部做的事等价于：
+
 ```powershell
-# 1. 连 VPN 后重启 Edge
-Get-Process msedge | Stop-Process -Force
-Start-Process "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" `
-  -ArgumentList "--remote-debugging-port=9222", "--remote-allow-origins=*", `
-  "https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/"
-
-# 2. 用户在 Edge 完成 CAS 登录
-
-# 3. 提取 cookie
-python get_all_cookies.py
+# 独立 profile 起一个带调试端口的窗口（Edge 136+ 下，默认 profile 带端口无效）
+msedge.exe --remote-debugging-port=9222 --remote-allow-origins=* `
+  --user-data-dir="%LOCALAPPDATA%\seu-cloud-classroom\cdp-profile" `
+  https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/
+# 用户在该窗口完成 CAS 登录后，脚本 CDP 取 cookie
 ```
 
 **CDP 关键坑**:
 - 必须 `Network.getAllCookies`（不是 `getCookies`）——3 个 cookie path 是 `/jy-application-resourcemanage/`
-- Edge 必须在 VPN 之后启动
+- **Chromium 136+ 对默认 profile 禁用远程调试**：`--remote-debugging-port` 被静默忽略，端口不监听。必须配独立 `--user-data-dir`
+- 同一 profile 已被实例占用时，新进程会立刻 exit 0 且不开端口（表现为"启动成功但连不上 9222"）
+- 浏览器必须在 VPN 之后启动（否则登录页都打不开）
 - `--remote-allow-origins=*` 必须
 
 ### 方法 2: 手动复制
@@ -65,6 +69,18 @@ API 前缀: `https://cvs.seu.edu.cn/jy-application-resourcemanage`
 | `/v1/course_vod_subtitle` | GET | `courseId={record.id}` | `{data: [{bg, ed, res, courId, transferType}]}` |
 
 `transferType=1` = AI 语音识别。`id` 是负数（Snowflake ID）。
+
+**没转写的节**返回 HTTP 200 + `{"data": [], "dataOk": true, "ok": true}`（不是 404/500），
+所以"空"要结合记录字段 `transcriptOptimizeTaskStatus` 判断：
+
+| 值 | 含义 |
+|---|---|
+| `0` | 未开始/排队中 |
+| `1` | 转写中 |
+| `3` | 完成 |
+| `4` | 失败/待重试 |
+| `6` | 完成（优化版） |
+| `null` | 旧数据，已完成 |
 
 ### 播放相关
 
